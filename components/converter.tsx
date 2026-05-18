@@ -32,7 +32,13 @@ function makeId() {
   return Math.random().toString(36).slice(2, 9);
 }
 
-export function Converter() {
+export function Converter({
+  onComplete,
+  onReset,
+}: {
+  onComplete?: () => void;
+  onReset?: () => void;
+} = {}) {
   const [stage, setStage] = useState<Stage>("idle");
   const [items, setItems] = useState<FileItem[]>([]);
   const [currentItemId, setCurrentItemId] = useState<string | null>(null);
@@ -114,7 +120,8 @@ export function Converter() {
 
     setCurrentItemId(null);
     setStage("complete");
-  }, [items]);
+    onComplete?.();
+  }, [items, onComplete]);
 
   const reset = useCallback(() => {
     items.forEach((i) => {
@@ -125,7 +132,8 @@ export function Converter() {
     setCurrentItemId(null);
     setCurrentProgress(0);
     setConvertIdx(0);
-  }, [items]);
+    onReset?.();
+  }, [items, onReset]);
 
   const currentItem = currentItemId ? items.find((i) => i.id === currentItemId) : null;
 
