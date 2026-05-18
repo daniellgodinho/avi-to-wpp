@@ -4,9 +4,8 @@ import { useState, useCallback, useRef } from "react";
 import { loadFFmpeg, convertToWhatsApp } from "@/lib/ffmpeg";
 import {
   IconUpload,
-  IconFilm,
-  IconCheck,
-  IconDownload,
+  IconAdd,
+  IconVideo,
   IconConverting,
 } from "@/components/icons";
 
@@ -103,10 +102,10 @@ export function Converter() {
           prev.map((i) =>
             i.id === id
               ? {
-                  ...i,
-                  status: "error",
-                  errorMsg: err instanceof Error ? err.message : "erro desconhecido",
-                }
+                ...i,
+                status: "error",
+                errorMsg: err instanceof Error ? err.message : "erro desconhecido",
+              }
               : i
           )
         );
@@ -297,8 +296,8 @@ function SmallDropZone({
       onDragLeave={onDragLeave}
       onClick={onClick}
     >
-      <IconUpload size={24} />
-      <p className="text-sm text-ink/50">adicionar mais videos</p>
+      <IconAdd size={24} />
+      <p className="text-sm text-ink/50">clique aqui para adicionar mais videos</p>
     </button>
   );
 }
@@ -312,11 +311,7 @@ function FileRow({
 }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3 border-b border-ink/5 last:border-0">
-      {item.status === "done" ? (
-        <IconCheck size={28} />
-      ) : (
-        <IconFilm size={28} />
-      )}
+      <IconVideo size={28} />
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-ink truncate">
@@ -338,7 +333,6 @@ function FileRow({
           download={item.outputName}
           className="flex items-center gap-1 text-xs font-bold text-sec bg-accent px-3 py-1.5 rounded-lg hover:bg-accent-hover transition-colors shrink-0"
         >
-          <IconDownload size={13} />
           baixar
         </a>
       )}
