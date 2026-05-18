@@ -142,6 +142,12 @@ export function Converter() {
 
       <div className="w-full max-w-md flex flex-col gap-3">
         {stage === "idle" && (
+          <p className="text-center text-ink/60 text-sm leading-relaxed -mt-6 mb-1">
+            clica no quadro abaixo e seleciona o video que vc quer corrigir, nenen
+          </p>
+        )}
+
+        {stage === "idle" && (
           <DropZone
             dragging={dragging}
             onDrop={(e) => {

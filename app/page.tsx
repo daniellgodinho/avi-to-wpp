@@ -19,9 +19,6 @@ export default function Home() {
         <h1 className="text-5xl font-extrabold text-ink leading-tight">
           conversor de vídeos pra minha namorada
         </h1>
-        <p className="mt-3 text-ink/60 max-w-xs mx-auto leading-relaxed">
-          clica no quadro abaixo e seleciona o video que vc quer corrigir, neném
-        </p>
       </header>
 
       <Converter />
