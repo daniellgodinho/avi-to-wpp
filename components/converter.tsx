@@ -4,7 +4,7 @@ import { useState, useCallback, useRef } from "react";
 import { loadFFmpeg, convertToWhatsApp } from "@/lib/ffmpeg";
 import {
   IconUpload,
-  IconAdd,
+  IconPictures,
   IconVideo,
   IconConverting,
 } from "@/components/icons";
@@ -131,9 +131,9 @@ export function Converter() {
 
   return (
     <>
-      {stage === "busy" && currentItem && (
+      {stage === "busy" && (
         <ConvertingOverlay
-          filename={currentItem.file.name}
+          filename={currentItem?.file.name ?? null}
           progress={currentProgress}
           current={convertIdx + 1}
           total={totalToConvert}
@@ -296,7 +296,7 @@ function SmallDropZone({
       onDragLeave={onDragLeave}
       onClick={onClick}
     >
-      <IconAdd size={24} />
+      <IconPictures size={24} />
       <p className="text-sm text-ink/50">clique aqui para adicionar mais videos</p>
     </button>
   );
@@ -357,12 +357,13 @@ function ConvertingOverlay({
   current,
   total,
 }: {
-  filename: string;
+  filename: string | null;
   progress: number;
   current: number;
   total: number;
 }) {
   const pct = Math.round(progress * 100);
+  const loading = filename === null;
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center backdrop-blur-xl bg-sec/85">
       <div className="flex flex-col items-center gap-6 px-8 text-center">
@@ -371,8 +372,10 @@ function ConvertingOverlay({
         </div>
         <div className="flex flex-col gap-2">
           <p className="font-extrabold text-ink text-2xl">so aguardar amor</p>
-          <p className="text-ink/50 text-sm max-w-xs truncate">{filename}</p>
-          <p className="text-accent font-extrabold text-4xl">{pct}%</p>
+          <p className="text-ink/50 text-sm max-w-xs truncate">
+            {loading ? "preparando..." : filename}
+          </p>
+          {!loading && <p className="text-accent font-extrabold text-4xl">{pct}%</p>}
           {total > 1 && (
             <p className="text-ink/35 text-xs">
               {current} de {total}
