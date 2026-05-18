@@ -9,7 +9,7 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Conversor da Nina",
+  title: "conversor de vídeos pra minha bebezinha",
   description: "Converte videos .avi para o formato do Whatsapp",
 };
 

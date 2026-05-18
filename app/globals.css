@@ -6,6 +6,18 @@
   --color-sec: #fdf0d5;
   --color-sec-dark: #f0ddb8;
   --color-ink: #2c1a0e;
+  --animate-glow-pulse: glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
 }
 
 body {

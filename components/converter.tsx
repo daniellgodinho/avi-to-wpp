@@ -2,119 +2,227 @@
 
 import { useState, useCallback, useRef } from "react";
 import { loadFFmpeg, convertToWhatsApp } from "@/lib/ffmpeg";
-import { IconUploadCloud, IconFilm, IconCheck, IconDownload } from "@/components/icons";
+import {
+  IconUpload,
+  IconFilm,
+  IconCheck,
+  IconDownload,
+  IconConverting,
+} from "@/components/icons";
 
-type State =
-  | { phase: "idle" }
-  | { phase: "selected"; file: File }
-  | { phase: "loading" }
-  | { phase: "converting"; progress: number }
-  | { phase: "done"; url: string; filename: string; size: number }
-  | { phase: "error"; message: string };
+type FileStatus = "pending" | "done" | "error";
+
+type FileItem = {
+  id: string;
+  file: File;
+  status: FileStatus;
+  outputUrl?: string;
+  outputName?: string;
+  outputSize?: number;
+  errorMsg?: string;
+};
+
+type Stage = "idle" | "ready" | "busy" | "complete";
 
 function bytes(n: number): string {
   if (n < 1_000_000) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1_000_000).toFixed(1)} MB`;
 }
 
+function makeId() {
+  return Math.random().toString(36).slice(2, 9);
+}
+
 export function Converter() {
-  const [state, setState] = useState<State>({ phase: "idle" });
+  const [stage, setStage] = useState<Stage>("idle");
+  const [items, setItems] = useState<FileItem[]>([]);
+  const [currentItemId, setCurrentItemId] = useState<string | null>(null);
+  const [currentProgress, setCurrentProgress] = useState(0);
+  const [totalToConvert, setTotalToConvert] = useState(0);
+  const [convertIdx, setConvertIdx] = useState(0);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const pick = useCallback((file: File) => {
-    setState({ phase: "selected", file });
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const arr = Array.from(files);
+    if (arr.length === 0) return;
+    setItems((prev) => [
+      ...prev,
+      ...arr.map((file) => ({
+        id: makeId(),
+        file,
+        status: "pending" as FileStatus,
+      })),
+    ]);
+    setStage("ready");
   }, []);
 
-  const convert = useCallback(async () => {
-    if (state.phase !== "selected") return;
-    const { file } = state;
+  const removeItem = useCallback((id: string) => {
+    setItems((prev) => {
+      const next = prev.filter((i) => i.id !== id);
+      if (next.length === 0) setStage("idle");
+      return next;
+    });
+  }, []);
 
-    setState({ phase: "loading" });
-    try {
-      await loadFFmpeg();
-      setState({ phase: "converting", progress: 0 });
+  const convertAll = useCallback(async () => {
+    const toConvert = items
+      .filter((i) => i.status === "pending")
+      .map((i) => ({ id: i.id, file: i.file }));
 
-      const blob = await convertToWhatsApp(file, (progress) => {
-        setState({ phase: "converting", progress });
-      });
+    if (toConvert.length === 0) return;
 
-      const filename = file.name.replace(/\.[^.]+$/, "") + "_whatsapp.mp4";
-      setState({
-        phase: "done",
-        url: URL.createObjectURL(blob),
-        filename,
-        size: blob.size,
-      });
-    } catch (err) {
-      setState({
-        phase: "error",
-        message:
-          err instanceof Error ? err.message : "algo deu errado, tenta de novo",
-      });
+    setStage("busy");
+    setTotalToConvert(toConvert.length);
+
+    await loadFFmpeg();
+
+    for (let idx = 0; idx < toConvert.length; idx++) {
+      const { id, file } = toConvert[idx];
+      setCurrentItemId(id);
+      setCurrentProgress(0);
+      setConvertIdx(idx);
+
+      try {
+        const blob = await convertToWhatsApp(file, (progress) => {
+          setCurrentProgress(progress);
+        });
+
+        const outputName = file.name.replace(/\.[^.]+$/, "") + "_whatsapp.mp4";
+        const url = URL.createObjectURL(blob);
+
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === id
+              ? { ...i, status: "done", outputUrl: url, outputName, outputSize: blob.size }
+              : i
+          )
+        );
+      } catch (err) {
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === id
+              ? {
+                  ...i,
+                  status: "error",
+                  errorMsg: err instanceof Error ? err.message : "erro desconhecido",
+                }
+              : i
+          )
+        );
+      }
     }
-  }, [state]);
+
+    setCurrentItemId(null);
+    setStage("complete");
+  }, [items]);
 
   const reset = useCallback(() => {
-    if (state.phase === "done") URL.revokeObjectURL(state.url);
-    setState({ phase: "idle" });
-  }, [state]);
+    items.forEach((i) => {
+      if (i.outputUrl) URL.revokeObjectURL(i.outputUrl);
+    });
+    setItems([]);
+    setStage("idle");
+    setCurrentItemId(null);
+    setCurrentProgress(0);
+    setConvertIdx(0);
+  }, [items]);
+
+  const currentItem = currentItemId ? items.find((i) => i.id === currentItemId) : null;
 
   return (
-    <div className="w-full max-w-md">
-      {state.phase === "idle" && (
-        <DropZone
-          dragging={dragging}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            const f = e.dataTransfer.files[0];
-            if (f) pick(f);
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onClick={() => inputRef.current?.click()}
+    <>
+      {stage === "busy" && currentItem && (
+        <ConvertingOverlay
+          filename={currentItem.file.name}
+          progress={currentProgress}
+          current={convertIdx + 1}
+          total={totalToConvert}
         />
       )}
 
-      {state.phase === "selected" && (
-        <FileCard file={state.file} onConvert={convert} onReset={reset} />
-      )}
+      <div className="w-full max-w-md flex flex-col gap-3">
+        {stage === "idle" && (
+          <DropZone
+            dragging={dragging}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              addFiles(e.dataTransfer.files);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onClick={() => inputRef.current?.click()}
+          />
+        )}
 
-      {state.phase === "loading" && <LoadingCard />}
+        {stage === "ready" && (
+          <SmallDropZone
+            dragging={dragging}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              addFiles(e.dataTransfer.files);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onClick={() => inputRef.current?.click()}
+          />
+        )}
 
-      {state.phase === "converting" && (
-        <ProgressCard progress={state.progress} />
-      )}
+        {items.length > 0 && (
+          <div className="rounded-2xl border border-ink/10 bg-white/30 overflow-hidden">
+            {items.map((item) => (
+              <FileRow
+                key={item.id}
+                item={item}
+                onRemove={stage === "ready" ? () => removeItem(item.id) : undefined}
+              />
+            ))}
+          </div>
+        )}
 
-      {state.phase === "done" && (
-        <DoneCard
-          url={state.url}
-          filename={state.filename}
-          size={state.size}
-          onReset={reset}
-        />
-      )}
+        {stage === "ready" && items.some((i) => i.status === "pending") && (
+          <button
+            type="button"
+            onClick={convertAll}
+            className="w-full bg-accent text-sec font-bold py-3 rounded-xl hover:bg-accent-hover transition-colors text-sm"
+          >
+            {items.length > 1
+              ? `converter ${items.length} videos`
+              : "converter o video"}
+          </button>
+        )}
 
-      {state.phase === "error" && (
-        <ErrorCard message={state.message} onReset={reset} />
-      )}
+        {stage === "complete" && (
+          <button
+            type="button"
+            onClick={reset}
+            className="text-ink/40 text-xs hover:text-ink/70 transition-colors text-center py-2"
+          >
+            converter mais
+          </button>
+        )}
+      </div>
 
       <input
         ref={inputRef}
         type="file"
         accept="video/*"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) pick(f);
+          if (e.target.files) addFiles(e.target.files);
           e.target.value = "";
         }}
       />
-    </div>
+    </>
   );
 }
 
@@ -147,10 +255,12 @@ function DropZone({
       onDragLeave={onDragLeave}
       onClick={onClick}
     >
-      <IconUploadCloud size={64} />
+      <IconUpload size={64} />
       <div className="text-center">
-        <p className="font-semibold text-ink">arraste o video aqui</p>
-        <p className="text-ink/50 text-sm mt-1">ou clica pra escolher</p>
+        <p className="font-semibold text-ink">arraste os videos aqui</p>
+        <p className="text-ink/50 text-sm mt-1">
+          ou clica pra escolher (pode selecionar varios)
+        </p>
       </div>
       <span className="text-xs text-ink/40 bg-ink/5 px-3 py-1 rounded-full">
         .avi e outros formatos
@@ -159,146 +269,123 @@ function DropZone({
   );
 }
 
-function FileCard({
-  file,
-  onConvert,
-  onReset,
+function SmallDropZone({
+  dragging,
+  onDrop,
+  onDragOver,
+  onDragLeave,
+  onClick,
 }: {
-  file: File;
-  onConvert: () => void;
-  onReset: () => void;
+  dragging: boolean;
+  onDrop: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onClick: () => void;
 }) {
-  const large = file.size > 100 * 1024 * 1024;
-
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white/30 p-6 flex flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <IconFilm size={48} />
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-ink truncate text-sm">{file.name}</p>
-          <p className="text-ink/50 text-xs mt-0.5">{bytes(file.size)}</p>
-        </div>
-      </div>
+    <button
+      type="button"
+      className={[
+        "w-full rounded-xl border border-dashed p-3",
+        "flex items-center gap-3 transition-colors cursor-pointer",
+        dragging
+          ? "border-accent bg-accent/5"
+          : "border-ink/20 hover:border-accent/40 hover:bg-accent/5",
+      ].join(" ")}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onClick={onClick}
+    >
+      <IconUpload size={24} />
+      <p className="text-sm text-ink/50">adicionar mais videos</p>
+    </button>
+  );
+}
 
-      {large && (
-        <p className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-lg border border-amber-200">
-          esse arquivo e grande e pode ficar acima do limite do Whatsapp depois de convertido
-        </p>
+function FileRow({
+  item,
+  onRemove,
+}: {
+  item: FileItem;
+  onRemove?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 border-b border-ink/5 last:border-0">
+      {item.status === "done" ? (
+        <IconCheck size={28} />
+      ) : (
+        <IconFilm size={28} />
       )}
 
-      <button
-        type="button"
-        onClick={onConvert}
-        className="w-full bg-accent text-sec font-bold py-3 rounded-xl hover:bg-accent-hover transition-colors text-sm"
-      >
-        converter para Whatsapp
-      </button>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-ink truncate">
+          {item.status === "done" ? item.outputName : item.file.name}
+        </p>
+        <p className="text-xs text-ink/40 mt-0.5">
+          {item.status === "done" && item.outputSize
+            ? bytes(item.outputSize)
+            : bytes(item.file.size)}
+        </p>
+        {item.status === "error" && (
+          <p className="text-xs text-accent mt-0.5">{item.errorMsg}</p>
+        )}
+      </div>
 
-      <button
-        type="button"
-        onClick={onReset}
-        className="text-ink/40 text-xs hover:text-ink/70 transition-colors text-center"
-      >
-        escolher outro arquivo
-      </button>
+      {item.status === "done" && item.outputUrl && item.outputName && (
+        <a
+          href={item.outputUrl}
+          download={item.outputName}
+          className="flex items-center gap-1 text-xs font-bold text-sec bg-accent px-3 py-1.5 rounded-lg hover:bg-accent-hover transition-colors shrink-0"
+        >
+          <IconDownload size={13} />
+          baixar
+        </a>
+      )}
+
+      {onRemove && item.status === "pending" && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="text-ink/25 hover:text-accent transition-colors shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs"
+          aria-label="remover"
+        >
+          x
+        </button>
+      )}
     </div>
   );
 }
 
-function LoadingCard() {
-  return (
-    <div className="rounded-2xl border border-ink/10 bg-white/30 p-12 flex flex-col items-center gap-4">
-      <svg className="animate-spin" width="40" height="40" viewBox="0 0 40 40" fill="none">
-        <circle cx="20" cy="20" r="16" stroke="#c1121f" strokeWidth="3" strokeOpacity="0.2" />
-        <path
-          d="M36 20C36 11.2 28.8 4 20 4"
-          stroke="#c1121f"
-          strokeWidth="3"
-          strokeLinecap="round"
-        />
-      </svg>
-      <p className="text-ink/50 text-sm">preparando o conversor...</p>
-      <p className="text-ink/30 text-xs">isso so demora na primeira vez</p>
-    </div>
-  );
-}
-
-function ProgressCard({ progress }: { progress: number }) {
+function ConvertingOverlay({
+  filename,
+  progress,
+  current,
+  total,
+}: {
+  filename: string;
+  progress: number;
+  current: number;
+  total: number;
+}) {
   const pct = Math.round(progress * 100);
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white/30 p-8 flex flex-col gap-5">
-      <p className="font-semibold text-ink text-center">convertendo...</p>
-      <div className="w-full bg-ink/10 rounded-full h-2.5 overflow-hidden">
-        <div
-          className="bg-accent h-2.5 rounded-full transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center backdrop-blur-xl bg-sec/85">
+      <div className="flex flex-col items-center gap-6 px-8 text-center">
+        <div className="animate-glow-pulse">
+          <IconConverting size={96} />
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className="font-extrabold text-ink text-2xl">so aguardar amor</p>
+          <p className="text-ink/50 text-sm max-w-xs truncate">{filename}</p>
+          <p className="text-accent font-extrabold text-4xl">{pct}%</p>
+          {total > 1 && (
+            <p className="text-ink/35 text-xs">
+              {current} de {total}
+            </p>
+          )}
+        </div>
       </div>
-      <p className="text-center text-accent font-extrabold text-2xl">{pct}%</p>
-      <p className="text-center text-ink/35 text-xs">
-        dependendo do tamanho, pode demorar um pouco
-      </p>
-    </div>
-  );
-}
-
-function DoneCard({
-  url,
-  filename,
-  size,
-  onReset,
-}: {
-  url: string;
-  filename: string;
-  size: number;
-  onReset: () => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-ink/10 bg-white/30 p-6 flex flex-col gap-4">
-      <div className="flex flex-col items-center gap-2 py-3">
-        <IconCheck size={56} />
-        <p className="font-bold text-ink text-lg">prontinho, amor!</p>
-        <p className="text-ink/45 text-sm">{bytes(size)} convertido</p>
-      </div>
-
-      <a
-        href={url}
-        download={filename}
-        className="w-full bg-accent text-sec font-bold py-3 rounded-xl hover:bg-accent-hover transition-colors text-center text-sm flex items-center justify-center gap-2"
-      >
-        <IconDownload size={18} />
-        baixar o video
-      </a>
-
-      <button
-        type="button"
-        onClick={onReset}
-        className="text-ink/40 text-xs hover:text-ink/70 transition-colors text-center"
-      >
-        converter outro
-      </button>
-    </div>
-  );
-}
-
-function ErrorCard({
-  message,
-  onReset,
-}: {
-  message: string;
-  onReset: () => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-accent/20 bg-accent/5 p-8 flex flex-col items-center gap-3">
-      <p className="font-semibold text-accent">algo deu errado</p>
-      <p className="text-ink/55 text-sm text-center">{message}</p>
-      <button
-        type="button"
-        onClick={onReset}
-        className="text-accent/70 text-sm hover:text-accent transition-colors underline underline-offset-2"
-      >
-        tentar de novo
-      </button>
     </div>
   );
 }
